@@ -1,0 +1,76 @@
+#include <Wire.h>
+#include <Adafruit_MPR121.h>
+
+Adafruit_MPR121 cap = Adafruit_MPR121();
+
+// Magnetschalter an digitalen Pins:
+const int magnetPins[4] = {2, 3, 4, 5};
+// Aktueller Status für Entprellung
+bool lastMagnetState[4] = {false, false, false, false};
+
+// Beispiel-Noten-Matrix [Magnet][Touchsensor] -> MIDI-Note
+// MIDI-Notenbereich: 0–127
+int midiNotes[4][8] = {
+  {60, 61, 62, 63, 64, 65, 66, 67}, // Magnet 0
+  {68, 69, 70, 71, 72, 73, 74, 75}, // Magnet 1
+  {76, 77, 78, 79, 80, 81, 82, 83}, // Magnet 2
+  {84, 85, 86, 87, 88, 89, 90, 91}  // Magnet 3
+};
+
+void setup() {
+  Serial.begin(115200); // Für Hairless MIDI
+  Wire.begin();
+
+  if (!cap.begin(0x5A)) {
+    Serial.println("MPR121 nicht gefunden. Checke Verkabelung!");
+    while (1);
+  }
+
+  for (int i = 0; i < 4; i++) {
+    pinMode(magnetPins[i], INPUT_PULLUP);
+  }
+}
+
+void loop() {
+  // Touch-Status lesen
+  uint16_t touchState = cap.touched();
+
+  for (int i = 0; i < 4; i++) {
+    bool magnetTriggered = digitalRead(magnetPins[i]) == LOW;
+
+    if (magnetTriggered && !lastMagnetState[i]) {
+      // Trigger erkannt (LOW->HIGH)
+      int activeTouch = getFirstActiveTouch(touchState);
+
+      if (activeTouch != -1 && activeTouch < 8) {
+        int note = midiNotes[i][activeTouch];
+        sendMidiNoteOn(note, 127); // max. velocity
+        delay(5); // kurzes Halten
+        sendMidiNoteOff(note, 0);
+      }
+    }
+
+    lastMagnetState[i] = magnetTriggered;
+  }
+
+  // delay(10); // leichte Entprellung
+}
+
+int getFirstActiveTouch(uint16_t touchState) {
+  for (int i = 0; i < 8; i++) {
+    if (touchState & (1 << i)) return i;
+  }
+  return -1; // keiner aktiv
+}
+
+void sendMidiNoteOn(byte note, byte velocity) {
+  Serial.write(0x90);    // Note ON, Channel 1
+  Serial.write(note);
+  Serial.write(velocity);
+}
+
+void sendMidiNoteOff(byte note, byte velocity) {
+  Serial.write(0x80);    // Note OFF, Channel 1
+  Serial.write(note);
+  Serial.write(velocity);
+}
